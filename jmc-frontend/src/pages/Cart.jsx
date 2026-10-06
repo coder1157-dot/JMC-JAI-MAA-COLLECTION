@@ -1,15 +1,19 @@
 import { Link, useNavigate } from "react-router-dom";
 import { FiMinus, FiPlus, FiTrash2 } from "react-icons/fi";
 import { useCart } from "../context/CartContext";
+import { useCustomerType } from "../context/CustomerTypeContext";
 import { useToast } from "../context/ToastContext";
 import EmptyState from "../components/EmptyState";
 import PageLoader from "../components/PageLoader";
-import { formatPrice, productImage } from "../utils/format";
+import { formatMoney, productImage } from "../utils/format";
 
 export default function Cart() {
-  const { items, totalItems, subtotal, loading, updateItem, removeItem, clear } = useCart();
+  const { items, totalItems, subtotal, currency: cartCurrency, loading, updateItem, removeItem, clear } = useCart();
+  const { currency: selected } = useCustomerType();
+  const currency = cartCurrency || selected;
   const toast = useToast();
   const navigate = useNavigate();
+  const unavailable = items.filter((it) => it.available === false);
 
   const run = async (fn) => {
     try {
@@ -39,6 +43,11 @@ export default function Cart() {
           ) : (
             <div className="row g-5">
               <div className="col-lg-8">
+                {unavailable.length > 0 && (
+                  <div className="alert-jmc error">
+                    Some items are no longer available in the quantity selected: {unavailable.map((u) => u.product.name).join(", ")}. Please adjust or remove them to continue.
+                  </div>
+                )}
                 {items.map((it) => (
                   <div className="cart-row" key={it.id}>
                     <Link to={`/product/${it.product.slug || it.product.id}`}>
@@ -47,7 +56,10 @@ export default function Cart() {
                     <div className="grow">
                       <div className="product-card-cat">{it.product.categoryName}</div>
                       <Link to={`/product/${it.product.slug || it.product.id}`} className="wish-name">{it.product.name}</Link>
-                      <div className="price">{formatPrice(it.product.price)}</div>
+                      {it.product.sku && <div className="product-card-sku">SKU: {it.product.sku}</div>}
+                      <div className="price">{formatMoney(it.product.price, currency)}</div>
+                      {it.available === false && <div className="stock stock-out">Only {Math.max(it.product.stock, 0)} in stock</div>}
+                      {it.product.internationalShipping === false && <div className="muted small">Ships within India only</div>}
                       <div className="qty">
                         <button aria-label="Decrease" disabled={it.quantity <= 1} onClick={() => run(() => updateItem(it.id, it.quantity - 1))}><FiMinus /></button>
                         <span>{it.quantity}</span>
@@ -55,20 +67,25 @@ export default function Cart() {
                       </div>
                     </div>
                     <div className="cart-line">
-                      <strong>{formatPrice(it.lineTotal)}</strong>
+                      <strong>{formatMoney(it.lineTotal, currency)}</strong>
                       <button className="link-btn" onClick={() => run(() => removeItem(it.id))}><FiTrash2 /> Remove</button>
                     </div>
                   </div>
                 ))}
-                <button className="link-btn mt-3" onClick={() => run(clear)}>Clear cart</button>
+                <div className="cart-footer-actions">
+                  <Link to="/jadau-jewellery" className="btn-jmc btn-jmc-outline btn-sm-jmc">Continue Shopping</Link>
+                  <button className="link-btn" onClick={() => run(clear)}>Clear cart</button>
+                </div>
               </div>
               <div className="col-lg-4">
                 <div className="panel summary">
                   <h2 className="panel-title">Order Summary</h2>
                   <div className="sum-row"><span>Items</span><span>{totalItems}</span></div>
-                  <div className="sum-row total"><span>Subtotal</span><span>{formatPrice(subtotal)}</span></div>
-                  <p className="muted small">Delivery and any coupon are confirmed at checkout.</p>
-                  <button className="btn-jmc btn-jmc-primary w-100" onClick={() => navigate("/checkout")}>Proceed to Checkout</button>
+                  <div className="sum-row total"><span>Subtotal</span><span>{formatMoney(subtotal, currency)}</span></div>
+                  <p className="muted small">Shipping and any coupon are calculated for your delivery country at checkout.</p>
+                  <button className="btn-jmc btn-jmc-primary w-100" disabled={unavailable.length > 0} onClick={() => navigate("/checkout")}>
+                    Proceed to Checkout
+                  </button>
                 </div>
               </div>
             </div>

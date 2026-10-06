@@ -378,3 +378,42 @@ General: 600 requests / 15 min / IP (health excluded). Auth endpoints: 30 / 15 m
 
 ## CORS
 Only origins listed in `FRONTEND_URL` receive CORS headers. Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS. Headers: `Content-Type`, `Authorization`. No cookies are used, so do not send `credentials: 'include'`.
+
+
+---
+
+# International ordering (added)
+
+Two customer modes: `INDIAN` (default, enquiry-only, no prices) and `INTERNATIONAL` (can see prices, use the cart, and buy).
+Stored values are lowercase for statuses/payment (`out_for_delivery`, `cod`, `razorpay`); input is case-insensitive, so `"OUT_FOR_DELIVERY"`, `"Out for Delivery"` and `"RAZORPAY"` are all accepted.
+
+**Prices.** Public product endpoints return `price`/`compareAtPrice` only when the request carries the token of an `INTERNATIONAL` customer (optional `?currency=USD`; only currencies that have a configured rate). Guests and Indian customers never get prices. Product `price` in MongoDB remains the single source of truth (in `BASE_CURRENCY`).
+
+**Access.** Cart, `POST /orders`, `/orders/quote`, `/orders/:id/retry-payment` and `/payments/*` require login and an INTERNATIONAL account (or the legacy `ONLINE_ORDERING_ENABLED=true`); otherwise `403`.
+
+## Auth / profile / addresses
+- `POST /auth/register` body adds `customerType` (`INDIAN` default | `INTERNATIONAL`). `PUT /auth/profile` can change it.
+- `GET /auth/addresses`, `POST /auth/addresses`, `PUT /auth/addresses/:addressId`, `DELETE /auth/addresses/:addressId` — max 10, one default. Fields: `fullName*, phone*, line1* (or addressLine1), line2, city*, state, postalCode, country*, email, label, isDefault`.
+- `GET /settings/currencies` → `{ base, available, razorpay }`.
+
+## Cart (same endpoints as before)
+`GET /cart?currency=USD`, `POST /cart {productId, quantity}`, `PUT /cart/:itemId {quantity}` **or** `{action:"increase"|"decrease", by?}`, `DELETE /cart/:itemId`, `DELETE /cart`. Payload now includes `currency` and per-item `available`.
+
+## Orders
+- `POST /orders/quote` `{ addressId | shippingAddress | country, currency?, couponCode?, items? }` → `{ quote: { items, subtotal, discount, shippingFee, total, currency, shippingMethod, estimatedDays } }`. Nothing is reserved.
+- `POST /orders` `{ addressId | shippingAddress, paymentMethod: "COD"|"RAZORPAY", currency?, couponCode?, notes?, items? }` (items default to the cart). Optional header `Idempotency-Key` (or body `idempotencyKey`): a repeat returns the original order with `duplicate: true`. Client-sent prices/totals/shipping are ignored. The delivery address is stored as a **snapshot** on the order. Response `{ order, requiresPayment }`.
+- `GET /orders?status=&page=&limit=`, `GET /orders/:id` (own orders only; someone else's id → 404).
+- `POST /orders/:id/cancel` — customer, only while `pending`/`confirmed`; stock is returned; a paid order is flagged for refund.
+- `POST /orders/:id/retry-payment` — new Razorpay order for an unpaid online order (same as `/payments/create-order`).
+
+New order fields: `customerType`, `customer{name,email,phone}`, `country`, `currency`, `baseCurrency`, `exchangeRate`, `shippingMethod`, `trackingNumber`, `courier`, `items[].lineTotal`, `shippingAddress.email`.
+Statuses: `pending, confirmed, processing, packed, shipped, out_for_delivery, delivered, cancelled, refund_initiated, refunded`. Payment status: `pending, paid, failed, refunded`.
+
+## Payments (Razorpay)
+`POST /payments/create-order {orderId}` (amount + currency come from the stored order), `POST /payments/verify {orderId, razorpay_order_id, razorpay_payment_id, razorpay_signature}` (HMAC verified server-side; duplicate callbacks are idempotent), `POST /payments/failed {orderId}` (records a failed/dismissed attempt; never overrides `paid`). COD stays `pending` until the order is marked `delivered`.
+
+## Admin
+- `GET /admin/orders` filters: `customerType, orderStatus|status, paymentStatus, paymentMethod, country, from, to, search` (order number, customer name/email/phone, SKU, Razorpay IDs), plus `page, limit`. Orders created before this change count as `INDIAN`. Each order has a `sections` object: `customer, delivery, products, payment, order`.
+- `GET /admin/orders/:id`, `PATCH /admin/orders/:id/status` `{ status?, paymentStatus?, note?, trackingNumber?, courier? }` (values validated).
+- `GET/POST /admin/shipping-rules`, `PUT/DELETE /admin/shipping-rules/:id` — `{ name, countries: ["united states" | "*"], baseFee, perItemFee, freeAbove, estimatedDays, priority, active }` (fees in the base currency). Create/update responses use the key `shippingrule`. **Create at least one rule (e.g. `countries: ["*"]`) before enabling international checkout**; without one, non-India destinations are rejected.
+- `PATCH /admin/users/:id/customer-type {customerType}`; `GET /admin/users?customerType=`.

@@ -11,3 +11,10 @@ export const getContact = (_req, res) => {
   // Only public information. No secrets ever go in this response.
   sendSuccess(res, { whatsapp, phone, email, address, social }, 'Contact settings fetched successfully');
 };
+
+/** Public: which currencies checkout can use right now. Rates themselves are not exposed. */
+export const getCurrencies = (_req, res) => {
+  const { base, supported, rates } = env.currency;
+  const available = [...new Set([base, ...supported])].filter((c) => c === base || rates[c]);
+  sendSuccess(res, { base, available, razorpay: env.razorpay.currencies }, 'Currencies fetched successfully');
+};

@@ -4,6 +4,21 @@ const inr = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
 export const formatPrice = (n) => `₹${inr.format(Number(n) || 0)}`;
 
+/** Money in any order/display currency (INR, USD, EUR, GBP, AED, CAD, AUD, SGD …). Amounts come from the backend. */
+export const formatMoney = (amount, currency = "INR") => {
+  const n = Number(amount) || 0;
+  try {
+    return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(n);
+  } catch {
+    return `${currency} ${n.toFixed(2)}`;
+  }
+};
+
 export const formatDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "";
 

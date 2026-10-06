@@ -1,11 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import * as wishApi from "../api/wishlist";
 import { useAuth } from "./AuthContext";
+import { useCustomerType } from "./CustomerTypeContext";
 
 const WishlistContext = createContext(null);
 
 export function WishlistProvider({ children }) {
   const { isAuthenticated } = useAuth();
+  const { viewKey } = useCustomerType(); // wishlist products carry prices for International customers
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +26,8 @@ export function WishlistProvider({ children }) {
   useEffect(() => {
     if (isAuthenticated) refresh();
     else setProducts([]);
-  }, [isAuthenticated, refresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, refresh, viewKey]);
 
   const ids = useMemo(() => new Set(products.map((p) => p.id)), [products]);
 

@@ -44,7 +44,7 @@ export const listProducts = async (req, res, extraFilter = {}, message = 'Produc
     Product.find(filter).sort(sort).skip(skip).limit(limit),
     Product.countDocuments(filter),
   ]);
-  sendSuccess(res, { products: toPublicProducts(products), pagination: buildPagination(page, limit, total) }, message);
+  sendSuccess(res, { products: toPublicProducts(products, req.user, { currency: req.query.currency }), pagination: buildPagination(page, limit, total) }, message);
 };
 
 export const getProducts = (req, res) => listProducts(req, res);
@@ -57,11 +57,11 @@ export const getProductById = async (req, res) => {
   assertObjectId(req.params.id, 'product id');
   const product = await Product.findOne({ _id: req.params.id, active: true });
   if (!product) throw new ApiError(404, 'Product not found');
-  sendSuccess(res, { product: toPublicProduct(product) }, 'Product fetched successfully');
+  sendSuccess(res, { product: toPublicProduct(product, req.user, { currency: req.query.currency }) }, 'Product fetched successfully');
 };
 
 export const getProductBySlug = async (req, res) => {
   const product = await Product.findOne({ slug: String(req.params.slug).toLowerCase(), active: true });
   if (!product) throw new ApiError(404, 'Product not found');
-  sendSuccess(res, { product: toPublicProduct(product) }, 'Product fetched successfully');
+  sendSuccess(res, { product: toPublicProduct(product, req.user, { currency: req.query.currency }) }, 'Product fetched successfully');
 };

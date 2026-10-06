@@ -1,9 +1,9 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { CART_ENABLED } from "./utils/constants";
 import { ToastProvider } from "./context/ToastContext";
 import { SettingsProvider } from "./context/SettingsContext";
 import { AuthProvider } from "./context/AuthContext";
+import { CustomerTypeProvider } from "./context/CustomerTypeContext";
 import { CartProvider } from "./context/CartContext";
 import { WishlistProvider } from "./context/WishlistContext";
 import { CategoriesProvider } from "./context/CategoriesContext";
@@ -11,6 +11,7 @@ import MainLayout from "./layouts/MainLayout";
 import AdminLayout from "./layouts/AdminLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminRoute from "./components/AdminRoute";
+import ShopRoute from "./components/ShopRoute";
 import ScrollToTop from "./components/ScrollToTop";
 import PageLoader from "./components/PageLoader";
 
@@ -55,6 +56,7 @@ export default function App() {
       <SettingsProvider>
         <CategoriesProvider>
           <AuthProvider>
+            <CustomerTypeProvider>
               <CartProvider>
                 <WishlistProvider>
                   <ScrollToTop />
@@ -80,8 +82,8 @@ export default function App() {
                           <Route path="/profile" element={<Profile />} />
                           <Route path="/account" element={<Navigate to="/profile" replace />} />
                           <Route path="/wishlist" element={<Wishlist />} />
-                          <Route path="/cart" element={CART_ENABLED ? <Cart /> : <Navigate to="/" replace />} />
-                          <Route path="/checkout" element={CART_ENABLED ? <Checkout /> : <Navigate to="/" replace />} />
+                          <Route path="/cart" element={<ShopRoute><Cart /></ShopRoute>} />
+                          <Route path="/checkout" element={<ShopRoute><Checkout /></ShopRoute>} />
                           <Route path="/orders" element={<Orders />} />
                           <Route path="/orders/:id" element={<OrderDetail />} />
                         </Route>
@@ -117,6 +119,7 @@ export default function App() {
                   </Suspense>
                 </WishlistProvider>
               </CartProvider>
+            </CustomerTypeProvider>
           </AuthProvider>
         </CategoriesProvider>
       </SettingsProvider>

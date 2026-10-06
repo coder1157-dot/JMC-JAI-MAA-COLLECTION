@@ -1,117 +1,102 @@
 import crypto from 'crypto';
 import Order from '../models/Order.js';
-import Product from '../models/Product.js';
 import Cart from '../models/Cart.js';
 import Coupon from '../models/Coupon.js';
 import { ApiError } from '../utils/ApiError.js';
 import { sendSuccess } from '../utils/response.js';
 import { assertObjectId, buildPagination, parsePagination } from '../utils/helpers.js';
-
-const ADDRESS_FIELDS = ['fullName', 'phone', 'line1', 'city', 'state', 'postalCode'];
+import { env } from '../config/env.js';
+import { normaliseEnum, ORDER_STATUSES, PAYMENT_METHODS } from '../utils/constants.js';
+import {
+  buildQuote, releaseOrderStock, reserveStock, resolveAddress, resolveLines, restoreStock,
+} from '../services/order.service.js';
 
 const newOrderNumber = () =>
   `JMC-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`;
 
-const calcDiscount = (coupon, subtotal) => {
-  let d = coupon.type === 'percent' ? (subtotal * coupon.value) / 100 : coupon.value;
-  if (coupon.maxDiscount) d = Math.min(d, coupon.maxDiscount);
-  return Math.round(Math.min(d, subtotal));
-};
+const CANCELLABLE = ['pending', 'confirmed'];
 
-const loadCoupon = async (code, subtotal) => {
-  const coupon = await Coupon.findOne({ code: String(code).trim().toUpperCase(), active: true });
-  if (!coupon) throw new ApiError(400, 'Invalid coupon code');
-  if (coupon.expiresAt && coupon.expiresAt < new Date()) throw new ApiError(400, 'This coupon has expired');
-  if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) throw new ApiError(400, 'This coupon has reached its usage limit');
-  if (subtotal < coupon.minOrderAmount) throw new ApiError(400, `Minimum order amount for this coupon is ₹${coupon.minOrderAmount}`);
-  return coupon;
+const quoteView = (q) => ({
+  items: q.items, subtotal: q.subtotal, discount: q.discount, shippingFee: q.shippingFee, total: q.total,
+  currency: q.currency, shippingMethod: q.shippingMethod, estimatedDays: q.estimatedDays,
+});
+
+/** POST /orders/quote — server-side price/shipping/total preview. Nothing is created or reserved. */
+export const quoteOrder = async (req, res) => {
+  const address = resolveAddress(req.user, req.body, { countryOnly: true });
+  const { lines } = await resolveLines(req, Cart);
+  const quote = await buildQuote({ lines, country: address.country, currency: req.body.currency, couponCode: req.body.couponCode });
+  sendSuccess(res, { quote: quoteView(quote) }, 'Quote calculated');
 };
 
 export const createOrder = async (req, res) => {
-  const { shippingAddress, paymentMethod = 'cod', couponCode, notes } = req.body;
-  if (!['cod', 'razorpay'].includes(paymentMethod)) throw new ApiError(400, 'paymentMethod must be "cod" or "razorpay"');
+  const method = normaliseEnum(req.body.paymentMethod ?? 'cod', PAYMENT_METHODS);
+  if (!method) throw new ApiError(400, 'paymentMethod must be "COD" or "RAZORPAY"');
 
-  const missing = ADDRESS_FIELDS.filter((f) => !String(shippingAddress?.[f] ?? '').trim());
-  if (missing.length) throw new ApiError(400, `Missing shipping address fields: ${missing.join(', ')}`, missing);
-
-  // Items come from the request body, or from the saved cart if none are sent.
-  let lines = Array.isArray(req.body.items) ? req.body.items : [];
-  const usingCart = lines.length === 0;
-  if (usingCart) {
-    const cart = await Cart.findOne({ user: req.user._id });
-    lines = (cart?.items || []).map((i) => ({ productId: String(i.product), quantity: i.quantity }));
-  }
-  if (!lines.length) throw new ApiError(400, 'No items to order');
-  if (lines.length > 50) throw new ApiError(400, 'Too many items in one order');
-
-  const merged = new Map();
-  for (const l of lines) {
-    assertObjectId(l.productId, 'productId');
-    const q = Number(l.quantity ?? 1);
-    if (!Number.isInteger(q) || q < 1 || q > 100) throw new ApiError(400, 'Quantity must be a whole number between 1 and 100');
-    merged.set(String(l.productId), (merged.get(String(l.productId)) || 0) + q);
+  // Duplicate-submit protection: same Idempotency-Key from the same user returns the original order.
+  const rawKey = req.get('Idempotency-Key') || req.body.idempotencyKey;
+  const idempotencyKey = typeof rawKey === 'string' && rawKey.trim() ? rawKey.trim().slice(0, 100) : undefined;
+  if (idempotencyKey) {
+    const prior = await Order.findOne({ user: req.user._id, idempotencyKey });
+    if (prior) return sendSuccess(res, { order: prior, duplicate: true }, 'Order already placed');
   }
 
-  const products = await Product.find({ _id: { $in: [...merged.keys()] }, active: true });
-  if (products.length !== merged.size) throw new ApiError(400, 'One or more products are unavailable');
+  const address = resolveAddress(req.user, req.body);
+  const { lines, usingCart } = await resolveLines(req, Cart);
+  const quote = await buildQuote({ lines, country: address.country, currency: req.body.currency, couponCode: req.body.couponCode });
 
-  const country = String(shippingAddress.country || 'India').trim();
-  const items = products.map((p) => {
-    const quantity = merged.get(String(p._id));
-    if (quantity > p.stock) throw new ApiError(400, `Only ${p.stock} unit(s) of "${p.name}" are in stock`);
-    if (country.toLowerCase() !== 'india' && !p.internationalShipping) {
-      throw new ApiError(400, `"${p.name}" cannot be shipped outside India`);
-    }
-    return { product: p._id, name: p.name, sku: p.sku, image: p.images?.[0]?.url || '', price: p.price, quantity };
-  });
-
-  const subtotal = items.reduce((n, i) => n + i.price * i.quantity, 0);
-  let discount = 0;
-  let coupon = null;
-  if (couponCode) {
-    coupon = await loadCoupon(couponCode, subtotal);
-    discount = calcDiscount(coupon, subtotal);
+  if (method === 'razorpay' && !env.razorpay.currencies.includes(quote.currency)) {
+    throw new ApiError(400, `Online payment is not available in ${quote.currency}. Choose ${env.razorpay.currencies.join('/')} or Cash on Delivery.`);
   }
-  const shippingFee = 0; // Free shipping. Adjust here if shipping charges are introduced.
-  const total = subtotal - discount + shippingFee;
 
-  // Reserve stock atomically; roll back if any line fails.
-  const reserved = [];
+  await reserveStock(quote.items);
+
+  let order;
   try {
-    for (const i of items) {
-      const r = await Product.updateOne({ _id: i.product, stock: { $gte: i.quantity } }, { $inc: { stock: -i.quantity } });
-      if (r.modifiedCount !== 1) throw new ApiError(409, `"${i.name}" just went out of stock`);
-      reserved.push(i);
-    }
+    order = await Order.create({
+      orderNumber: newOrderNumber(),
+      user: req.user._id,
+      customerType: req.user.customerType || 'INDIAN',
+      customer: { name: address.fullName, email: address.email || req.user.email, phone: address.phone },
+      items: quote.items,
+      shippingAddress: address, // SNAPSHOT: later edits to saved addresses never touch this
+      country: address.country,
+      paymentMethod: method,
+      paymentStatus: 'pending', // COD stays pending until delivery; Razorpay until signature verified
+      subtotal: quote.subtotal,
+      discount: quote.discount,
+      shippingFee: quote.shippingFee,
+      shippingMethod: quote.shippingMethod,
+      total: quote.total,
+      currency: quote.currency,
+      baseCurrency: quote.baseCurrency,
+      exchangeRate: quote.exchangeRate,
+      couponCode: quote.coupon?.code || '',
+      notes: typeof req.body.notes === 'string' ? req.body.notes.slice(0, 500) : '',
+      idempotencyKey,
+      stockReleased: false,
+      statusHistory: [{ status: 'pending', note: method === 'cod' ? 'Order placed (Cash on Delivery)' : 'Order placed, awaiting payment' }],
+    });
   } catch (err) {
-    await Promise.all(reserved.map((i) => Product.updateOne({ _id: i.product }, { $inc: { stock: i.quantity } })));
+    await restoreStock(quote.items);
+    if (err.code === 11000 && idempotencyKey) {
+      const prior = await Order.findOne({ user: req.user._id, idempotencyKey });
+      if (prior) return sendSuccess(res, { order: prior, duplicate: true }, 'Order already placed');
+    }
     throw err;
   }
 
-  const order = await Order.create({
-    orderNumber: newOrderNumber(),
-    user: req.user._id,
-    items,
-    shippingAddress: { ...shippingAddress, country },
-    paymentMethod,
-    subtotal,
-    discount,
-    shippingFee,
-    total,
-    couponCode: coupon?.code || '',
-    notes: typeof notes === 'string' ? notes.slice(0, 500) : '',
-    statusHistory: [{ status: 'pending', note: 'Order placed' }],
-  });
-
-  if (coupon) await Coupon.updateOne({ _id: coupon._id }, { $inc: { usedCount: 1 } });
+  if (quote.coupon) await Coupon.updateOne({ _id: quote.coupon._id }, { $inc: { usedCount: 1 } });
   if (usingCart) await Cart.updateOne({ user: req.user._id }, { $set: { items: [] } });
 
-  sendSuccess(res, { order }, 'Order placed successfully', 201);
+  sendSuccess(res, { order, requiresPayment: method === 'razorpay' }, 'Order placed successfully', 201);
 };
 
 export const getMyOrders = async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query, 10);
   const filter = { user: req.user._id };
+  const status = normaliseEnum(req.query.status, ORDER_STATUSES);
+  if (status) filter.status = status;
   const [orders, total] = await Promise.all([
     Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
     Order.countDocuments(filter),
@@ -119,9 +104,28 @@ export const getMyOrders = async (req, res) => {
   sendSuccess(res, { orders, pagination: buildPagination(page, limit, total) }, 'Orders fetched successfully');
 };
 
+// Ownership is enforced in the query itself: someone else's id simply yields 404.
 export const getMyOrder = async (req, res) => {
   assertObjectId(req.params.id, 'order id');
   const order = await Order.findOne({ _id: req.params.id, user: req.user._id });
   if (!order) throw new ApiError(404, 'Order not found');
   sendSuccess(res, { order }, 'Order fetched successfully');
+};
+
+export const cancelMyOrder = async (req, res) => {
+  assertObjectId(req.params.id, 'order id');
+  const order = await Order.findOne({ _id: req.params.id, user: req.user._id });
+  if (!order) throw new ApiError(404, 'Order not found');
+  if (!CANCELLABLE.includes(order.status)) {
+    throw new ApiError(400, 'This order can no longer be cancelled. Please contact us on WhatsApp.');
+  }
+  const paid = order.paymentStatus === 'paid';
+  order.status = 'cancelled';
+  order.statusHistory.push({
+    status: 'cancelled',
+    note: `Cancelled by customer${paid ? ' (payment received: refund to be processed)' : ''}`,
+  });
+  await order.save();
+  await releaseOrderStock(order);
+  sendSuccess(res, { order }, paid ? 'Order cancelled. Your refund will be processed.' : 'Order cancelled');
 };

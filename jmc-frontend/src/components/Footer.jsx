@@ -2,10 +2,11 @@ import { Link } from "react-router-dom";
 import { FaFacebookF, FaInstagram, FaWhatsapp, FaYoutube } from "react-icons/fa";
 import Logo from "./Logo";
 import { useSettings } from "../context/SettingsContext";
-import { CART_ENABLED } from "../utils/constants";
+import { useCustomerType } from "../context/CustomerTypeContext";
 
 export default function Footer() {
   const { whatsapp, phone, email, address, social } = useSettings();
+  const { canShop } = useCustomerType();
   return (
     <footer className="site-footer">
       <div className="container">
@@ -53,7 +54,7 @@ export default function Footer() {
               <li><Link to="/profile">My Account</Link></li>
               <li><Link to="/orders">Orders</Link></li>
               <li><Link to="/wishlist">Wishlist</Link></li>
-              {CART_ENABLED && <li><Link to="/cart">Cart</Link></li>}
+              {canShop && <li><Link to="/cart">Cart</Link></li>}
             </ul>
           </div>
           <div className="col-lg-4">

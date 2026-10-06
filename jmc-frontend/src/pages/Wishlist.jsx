@@ -5,11 +5,15 @@ import EmptyState from "../components/EmptyState";
 import PageLoader from "../components/PageLoader";
 import { productImage } from "../utils/format";
 import WhatsAppEnquiryButton from "../components/WhatsAppEnquiryButton";
-import PriceOnEnquiry from "../components/PriceOnEnquiry";
+import PriceTag from "../components/PriceTag";
+import { useCustomerType } from "../context/CustomerTypeContext";
+import useShopActions from "../hooks/useShopActions";
 
 export default function Wishlist() {
   const { products, loading, remove } = useWishlist();
   const toast = useToast();
+  const { isInternational } = useCustomerType();
+  const { addToCart } = useShopActions();
 
   const onRemove = async (id) => {
     try {
@@ -47,10 +51,16 @@ export default function Wishlist() {
                   <div className="grow">
                     <div className="product-card-cat">{[p.categoryName, p.subcategory].filter(Boolean).join(" · ")}</div>
                     <Link to={`/product/${p.slug || p.id}`} className="wish-name">{p.name}</Link>
-                    <PriceOnEnquiry />
+                    <PriceTag product={p} />
                   </div>
                   <div className="wish-actions">
-                    <WhatsAppEnquiryButton product={p} />
+                    {isInternational ? (
+                      <button className="btn-jmc btn-jmc-primary btn-sm-jmc" disabled={p.stock <= 0} onClick={() => addToCart(p)}>
+                        {p.stock <= 0 ? "Sold Out" : "Add to Cart"}
+                      </button>
+                    ) : (
+                      <WhatsAppEnquiryButton product={p} />
+                    )}
                     <Link to={`/product/${p.slug || p.id}`} className="btn-jmc btn-jmc-outline btn-sm-jmc">View Details</Link>
                     <button className="btn-jmc btn-jmc-ghost-dark btn-sm-jmc" onClick={() => onRemove(p.id)}>Remove</button>
                   </div>

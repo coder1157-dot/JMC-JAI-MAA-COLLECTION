@@ -6,7 +6,8 @@ import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { useWishlist } from "../context/WishlistContext";
 import { useCategories } from "../context/CategoriesContext";
-import { CART_ENABLED } from "../utils/constants";
+import { useCustomerType } from "../context/CustomerTypeContext";
+import CustomerTypeSelector from "./CustomerTypeSelector";
 
 const NAV = [
   { label: "Home", to: "/", end: true },
@@ -27,6 +28,7 @@ export default function Header() {
   const { totalItems } = useCart();
   const wishlist = useWishlist();
   const { categories } = useCategories();
+  const { canShop } = useCustomerType();
 
   const subsOf = (slug) => categories.find((c) => c.slug === slug)?.subcategories || [];
   const close = () => {
@@ -46,6 +48,7 @@ export default function Header() {
   return (
     <header className="site-header">
       <div className="announce-bar">Timeless Jewellery • Personal Consultation • International Enquiries</div>
+      <CustomerTypeSelector />
 
       <div className="header-main">
         <div className="container header-inner">
@@ -88,7 +91,7 @@ export default function Header() {
             <Link to={isAdmin ? "/admin/dashboard" : isAuthenticated ? "/profile" : "/login"} className="icon-btn hide-sm" aria-label="Account">
               <FiUser />
             </Link>
-            {CART_ENABLED && (
+            {canShop && (
               <Link to="/cart" className="icon-btn" aria-label="Cart">
                 <FiShoppingBag />
                 {totalItems > 0 && <span className="count-dot">{totalItems}</span>}
@@ -149,6 +152,24 @@ export default function Header() {
               </Link>
             </div>
           </div>
+          {canShop && (
+            <>
+              <div className="drawer-item">
+                <div className="drawer-row">
+                  <Link to="/cart" onClick={close}>
+                    Cart{totalItems > 0 ? ` (${totalItems})` : ""}
+                  </Link>
+                </div>
+              </div>
+              <div className="drawer-item">
+                <div className="drawer-row">
+                  <Link to="/orders" onClick={close}>
+                    My Orders
+                  </Link>
+                </div>
+              </div>
+            </>
+          )}
           <div className="drawer-item">
             <div className="drawer-row">
               <Link to={isAdmin ? "/admin/dashboard" : isAuthenticated ? "/profile" : "/login"} onClick={close}>

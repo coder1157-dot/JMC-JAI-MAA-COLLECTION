@@ -1,22 +1,43 @@
-// JMC is an enquiry-based catalogue: product prices are private and never shown publicly.
-// Cart and checkout depend on prices, so they are switched off for customers.
-// Set to true to bring the cart/checkout flow back (it will then show prices again).
-export const CART_ENABLED = false;
-
-// Display-only estimate. The backend computes the real order total and is the final authority.
-export const DELIVERY_FEE_THRESHOLD = 1000;
-export const DELIVERY_FEE_ESTIMATE = 200;
+// JMC runs in two customer modes on the same website:
+//  - INDIAN         → enquiry-only catalogue (no prices, no cart, WhatsApp enquiry)
+//  - INTERNATIONAL  → prices, cart, checkout (COD / Razorpay), order tracking
+// The backend is the authority: it only returns prices / allows cart + orders for INTERNATIONAL accounts.
+export const CUSTOMER_TYPES = { INDIAN: "INDIAN", INTERNATIONAL: "INTERNATIONAL" };
 
 export const ORDER_STATUSES = [
   "pending",
   "confirmed",
   "processing",
+  "packed",
   "shipped",
   "out_for_delivery",
   "delivered",
   "cancelled",
+  "refund_initiated",
   "refunded",
 ];
+
+// Happy-path delivery timeline shown in Track Order.
+export const TRACK_STEPS = [
+  { key: "pending", label: "Order Placed" },
+  { key: "confirmed", label: "Confirmed" },
+  { key: "processing", label: "Processing" },
+  { key: "packed", label: "Packed" },
+  { key: "shipped", label: "Shipped" },
+  { key: "out_for_delivery", label: "Out for Delivery" },
+  { key: "delivered", label: "Delivered" },
+];
+export const EXCEPTION_STATUSES = ["cancelled", "refund_initiated", "refunded"];
+
+// Destinations where Cash on Delivery is offered. The backend does not publish a COD list, so this is
+// configurable: VITE_COD_COUNTRIES="India,United Arab Emirates" (default "*" = every destination).
+const rawCod = import.meta.env.VITE_COD_COUNTRIES ?? "*";
+export const COD_COUNTRIES = String(rawCod)
+  .split(",")
+  .map((c) => c.trim().toLowerCase())
+  .filter(Boolean);
+export const isCodAvailable = (country) =>
+  COD_COUNTRIES.includes("*") || COD_COUNTRIES.includes(String(country || "").trim().toLowerCase());
 export const PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded"];
 
 export const SORT_OPTIONS = [

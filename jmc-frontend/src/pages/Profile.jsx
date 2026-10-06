@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { CART_ENABLED } from "../utils/constants";
+import { useCustomerType } from "../context/CustomerTypeContext";
 
 export default function Profile() {
   const { user, isAdmin, updateProfile, logout } = useAuth();
+  const { canShop } = useCustomerType();
   const toast = useToast();
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", phone: "" });
@@ -43,7 +44,7 @@ export default function Profile() {
           <div className="quick-links">
             <Link to="/orders">My Orders</Link>
             <Link to="/wishlist">Wishlist</Link>
-            {CART_ENABLED && <Link to="/cart">Cart</Link>}
+            {canShop && <Link to="/cart">Cart</Link>}
           </div>
           <form className="panel" onSubmit={save}>
             <h2 className="panel-title">Profile</h2>

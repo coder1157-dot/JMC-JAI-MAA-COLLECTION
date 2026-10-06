@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { homeFor, useAuth } from "../context/AuthContext";
+import { useCustomerType } from "../context/CustomerTypeContext";
 
 export default function Register() {
   const { register } = useAuth();
+  const { customerType, isInternational } = useCustomerType();
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from;
@@ -17,7 +19,7 @@ export default function Register() {
     setBusy(true);
     setError("");
     try {
-      const payload = { name: form.name.trim(), email: form.email.trim(), password: form.password };
+      const payload = { name: form.name.trim(), email: form.email.trim(), password: form.password, customerType };
       if (form.phone.trim()) payload.phone = form.phone.trim();
       const res = await register(payload);
       navigate(homeFor(res.data.user, from), { replace: true });
@@ -34,6 +36,9 @@ export default function Register() {
         <span className="eyebrow">Join JMC</span>
         <h1 className="display">Create Account</h1>
         {error && <div className="alert-jmc error">{error}</div>}
+        <p className="muted small mb-3">
+          Registering as {isInternational ? "an International client (prices & online ordering)" : "an Indian client (WhatsApp enquiries)"}. Change this anytime from the top bar.
+        </p>
         <form onSubmit={submit}>
           <label className="field">Full name<input required value={form.name} onChange={set("name")} autoComplete="name" /></label>
           <label className="field">Email<input type="email" required value={form.email} onChange={set("email")} autoComplete="email" /></label>

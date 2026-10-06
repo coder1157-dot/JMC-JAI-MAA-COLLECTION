@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { getNewArrivals, getProducts } from "../api/products";
 import useAsync from "../hooks/useAsync";
 import { useCategories } from "../context/CategoriesContext";
+import { useCustomerType } from "../context/CustomerTypeContext";
 import { SORT_OPTIONS } from "../utils/constants";
 import ProductGrid from "./ProductGrid";
 import { SkeletonGrid } from "./SkeletonCard";
@@ -22,6 +23,7 @@ export default function ProductListing({ eyebrow, title, intro, fixedCategory, m
   const routeParams = useParams();
   const navigate = useNavigate();
   const { categories } = useCategories();
+  const { viewKey } = useCustomerType();
 
   const category = fixedCategory || params.get("category") || "";
   const subcategory = fixedCategory ? routeParams.subcategory || "" : params.get("subcategory") || "";
@@ -36,7 +38,7 @@ export default function ProductListing({ eyebrow, title, intro, fixedCategory, m
   const fetcher = mode === "new" ? getNewArrivals : getProducts;
   const { data, loading, error, reload } = useAsync(
     () => fetcher(query),
-    [mode, category, subcategory, search, sort, page]
+    [mode, category, subcategory, search, sort, page, viewKey]
   );
 
   const products = data?.data?.products || [];

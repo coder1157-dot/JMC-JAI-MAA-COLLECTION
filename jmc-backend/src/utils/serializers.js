@@ -1,20 +1,36 @@
+import { env } from '../config/env.js';
 import { ApiError } from './ApiError.js';
+import { convertFromBase, resolveCurrency } from './currency.js';
 
 /** Fields that exist on the Product model but are private (admin / internal use only). */
 export const PRIVATE_PRODUCT_FIELDS = ['price', 'compareAtPrice'];
 
+/** Only INTERNATIONAL customers (logged in) may see prices on customer-facing endpoints. */
+export const canViewPrices = (viewer) =>
+  Boolean(viewer) && viewer.customerType === 'INTERNATIONAL' && env.INTERNATIONAL_ORDERING_ENABLED;
+
 /**
- * Public representation of a product: the normal JSON (with `id`) minus private pricing.
+ * Customer-facing representation of a product: the normal JSON (with `id`) minus private pricing.
+ * Prices are included (converted to `opts.currency`, default base currency) only when the viewer is an
+ * INTERNATIONAL customer, or when `opts.forcePrices` is set by an endpoint that is already access-gated (cart).
  * Every customer-facing product response must go through this function.
  */
-export const toPublicProduct = (product) => {
+export const toPublicProduct = (product, viewer = null, opts = {}) => {
   if (!product) return product;
   const obj = typeof product.toJSON === 'function' ? product.toJSON() : { ...product };
-  PRIVATE_PRODUCT_FIELDS.forEach((f) => delete obj[f]);
+  if (opts.forcePrices || canViewPrices(viewer)) {
+    const currency = resolveCurrency(opts.currency);
+    obj.price = convertFromBase(obj.price, currency);
+    if (typeof obj.compareAtPrice === 'number') obj.compareAtPrice = convertFromBase(obj.compareAtPrice, currency);
+    obj.currency = currency;
+  } else {
+    PRIVATE_PRODUCT_FIELDS.forEach((f) => delete obj[f]);
+  }
   return obj;
 };
 
-export const toPublicProducts = (products = []) => products.map(toPublicProduct);
+export const toPublicProducts = (products = [], viewer = null, opts = {}) =>
+  products.map((p) => toPublicProduct(p, viewer, opts));
 
 const MAX_IMAGES = 15;
 

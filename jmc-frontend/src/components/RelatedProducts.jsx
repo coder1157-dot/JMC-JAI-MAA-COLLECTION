@@ -1,12 +1,14 @@
 import { getProducts } from "../api/products";
 import useAsync from "../hooks/useAsync";
+import { useCustomerType } from "../context/CustomerTypeContext";
 import ProductCard from "./ProductCard";
 
 /** Other pieces from the same category (and subcategory first, when available). */
 export default function RelatedProducts({ product }) {
+  const { viewKey } = useCustomerType();
   const { data } = useAsync(
     () => getProducts({ category: product.category, limit: 8 }),
-    [product.id, product.category]
+    [product.id, product.category, viewKey]
   );
   const all = (data?.data?.products || []).filter((p) => p.id !== product.id);
   const same = all.filter((p) => product.subcategorySlug && p.subcategorySlug === product.subcategorySlug);

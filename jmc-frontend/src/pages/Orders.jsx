@@ -2,15 +2,18 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { getOrders } from "../api/orders";
 import useAsync from "../hooks/useAsync";
+import usePolling from "../hooks/usePolling";
 import PageLoader from "../components/PageLoader";
 import ErrorState from "../components/ErrorState";
 import EmptyState from "../components/EmptyState";
 import Pagination from "../components/Pagination";
-import { formatDate, formatPrice, statusLabel } from "../utils/format";
+import { formatDate, formatMoney, statusLabel } from "../utils/format";
+import { PLACEHOLDER_IMAGE } from "../utils/constants";
 
 export default function Orders() {
   const [page, setPage] = useState(1);
   const { data, loading, error, reload } = useAsync(() => getOrders({ page, limit: 10 }), [page]);
+  usePolling(() => reload(true), 30000); // admin status changes show up without a manual refresh
   const orders = data?.data?.orders || [];
 
   return (
@@ -31,16 +34,32 @@ export default function Orders() {
             <EmptyState title="No orders yet." action={<Link to="/jadau-jewellery" className="btn-jmc btn-jmc-primary">Start Shopping</Link>} />
           ) : (
             <>
-              {orders.map((o) => (
-                <Link to={`/orders/${o.id}`} className="order-row" key={o.id}>
-                  <div>
-                    <strong>{o.orderNumber}</strong>
-                    <div className="muted small">{formatDate(o.createdAt)} · {o.items?.length || 0} item(s)</div>
+              {orders.map((o) => {
+                const first = o.items?.[0];
+                const more = (o.items?.length || 0) - 1;
+                return (
+                  <div className="order-row order-card" key={o.id}>
+                    <img className="order-thumb" src={first?.image || PLACEHOLDER_IMAGE} alt="" />
+                    <div className="order-main">
+                      <strong>{o.orderNumber}</strong>
+                      <div className="muted small">{formatDate(o.createdAt)}</div>
+                      <div className="order-product">
+                        {first?.name || "—"}
+                        {more > 0 && <span className="muted"> + {more} more</span>}
+                      </div>
+                    </div>
+                    <div className="order-pills">
+                      <span className={`pill pill-${o.status}`}>{statusLabel(o.status)}</span>
+                      <span className={`pill pill-pay-${o.paymentStatus}`}>Payment: {statusLabel(o.paymentStatus)}</span>
+                    </div>
+                    <div className="order-total">
+                      <strong>{formatMoney(o.total, o.currency || "INR")}</strong>
+                      <span className="muted small">{o.currency || "INR"}</span>
+                    </div>
+                    <Link to={`/orders/${o.id}`} className="btn-jmc btn-jmc-outline btn-sm-jmc">View Order</Link>
                   </div>
-                  <span className={`pill pill-${o.status}`}>{statusLabel(o.status)}</span>
-                  <strong>{formatPrice(o.total)}</strong>
-                </Link>
-              ))}
+                );
+              })}
               <Pagination pagination={data.data.pagination} onPage={setPage} />
             </>
           )}

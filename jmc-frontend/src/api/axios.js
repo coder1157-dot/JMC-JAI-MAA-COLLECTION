@@ -1,6 +1,9 @@
 import axios from "axios";
 
 export const TOKEN_KEY = "jmc_token";
+// Customer mode + display currency (written by CustomerTypeContext, read here so price-bearing calls follow it).
+export const CUSTOMER_TYPE_KEY = "jmc_customer_type";
+export const CURRENCY_KEY = "jmc_currency";
 
 // The ONLY place the API base URL is read.
 const api = axios.create({
@@ -21,6 +24,16 @@ const read = (key) => {
 api.interceptors.request.use((config) => {
   const token = read(TOKEN_KEY);
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// International customers see prices in their chosen currency: the backend converts (we never do).
+const PRICE_ROUTES = /^\/(products|cart|wishlist)(\/|$|\?)/;
+api.interceptors.request.use((config) => {
+  if (PRICE_ROUTES.test(config.url || "") && read(CUSTOMER_TYPE_KEY) === "INTERNATIONAL") {
+    const currency = read(CURRENCY_KEY);
+    if (currency && !config.params?.currency) config.params = { ...config.params, currency };
+  }
   return config;
 });
 

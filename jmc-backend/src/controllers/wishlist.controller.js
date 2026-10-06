@@ -5,13 +5,14 @@ import { sendSuccess } from '../utils/response.js';
 import { assertObjectId } from '../utils/helpers.js';
 import { toPublicProducts } from '../utils/serializers.js';
 
-const payload = async (userId) => {
+const payload = async (user) => {
+  const userId = user._id;
   const wl = await Wishlist.findOne({ user: userId }).populate({ path: 'products', match: { active: true } });
-  return { products: toPublicProducts(wl?.products || []) };
+  return { products: toPublicProducts(wl?.products || [], user) };
 };
 
 export const getWishlist = async (req, res) =>
-  sendSuccess(res, await payload(req.user._id), 'Wishlist fetched successfully');
+  sendSuccess(res, await payload(req.user), 'Wishlist fetched successfully');
 
 export const addToWishlist = async (req, res) => {
   assertObjectId(req.params.productId, 'product id');
@@ -21,11 +22,11 @@ export const addToWishlist = async (req, res) => {
     { $addToSet: { products: req.params.productId } },
     { upsert: true, new: true }
   );
-  sendSuccess(res, await payload(req.user._id), 'Added to wishlist', 201);
+  sendSuccess(res, await payload(req.user), 'Added to wishlist', 201);
 };
 
 export const removeFromWishlist = async (req, res) => {
   assertObjectId(req.params.productId, 'product id');
   await Wishlist.findOneAndUpdate({ user: req.user._id }, { $pull: { products: req.params.productId } });
-  sendSuccess(res, await payload(req.user._id), 'Removed from wishlist');
+  sendSuccess(res, await payload(req.user), 'Removed from wishlist');
 };

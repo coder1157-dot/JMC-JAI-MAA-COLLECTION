@@ -1,16 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { FaHeart, FaRegHeart } from "react-icons/fa";
+import { FiMinus, FiPlus } from "react-icons/fi";
 import { getProductById, getProductBySlug } from "../api/products";
 import useAsync from "../hooks/useAsync";
 import useShopActions from "../hooks/useShopActions";
+import useWhatsApp from "../hooks/useWhatsApp";
 import PageLoader from "../components/PageLoader";
 import ErrorState from "../components/ErrorState";
 import WhatsAppEnquiryButton from "../components/WhatsAppEnquiryButton";
-import PriceOnEnquiry from "../components/PriceOnEnquiry";
+import PriceTag from "../components/PriceTag";
+import { useCustomerType } from "../context/CustomerTypeContext";
 import RelatedProducts from "../components/RelatedProducts";
-import { CART_ENABLED } from "../utils/constants";
 import { isObjectId, productImage, stockLabel } from "../utils/format";
+
+function WhatsAppLink({ product }) {
+  const enquire = useWhatsApp();
+  return (
+    <button type="button" className="link-btn" onClick={() => enquire(product)}>
+      Chat with us on WhatsApp
+    </button>
+  );
+}
 
 function Gallery({ product }) {
   const imgs = product.images?.length ? product.images : [null];
@@ -47,11 +58,14 @@ function Gallery({ product }) {
 
 export default function ProductDetail() {
   const { id } = useParams();
+  const { isInternational, viewKey } = useCustomerType();
   const { data, loading, error, reload } = useAsync(
     () => (isObjectId(id) ? getProductById(id) : getProductBySlug(id)),
-    [id]
+    [id, viewKey]
   );
-  const { addToCart, toggleWishlist, inWishlist } = useShopActions();
+  const { addToCart, buyNow, toggleWishlist, inWishlist } = useShopActions();
+  const [qty, setQty] = useState(1);
+  useEffect(() => setQty(1), [id]);
 
   if (loading) return <PageLoader />;
   if (error)
@@ -67,6 +81,8 @@ export default function ProductDetail() {
   const p = data.data.product;
   const stock = stockLabel(p.stock);
   const wished = inWishlist(p.id);
+  const maxQty = Math.max(1, Math.min(p.stock || 1, 100));
+  const soldOut = p.stock <= 0;
   const specs = [
     ["SKU", p.sku],
     ["Material", p.material],
@@ -96,24 +112,50 @@ export default function ProductDetail() {
           <div className="col-lg-5">
             <span className="eyebrow">{p.categoryName}</span>
             <h1 className="display product-title">{p.name}</h1>
-            <PriceOnEnquiry text="Price available on enquiry" large />
+            <PriceTag product={p} large />
             <div className={`stock stock-${stock.tone} mb-3`}>{stock.text}</div>
             {p.description && <p className="product-desc">{p.description}</p>}
 
-            <div className="detail-actions">
-              <WhatsAppEnquiryButton product={p} size="lg" />
-              <div className={`detail-actions-row ${CART_ENABLED ? "" : "single"}`}>
-                {CART_ENABLED && (
-                  <button className="btn-jmc btn-jmc-primary" disabled={p.stock <= 0} onClick={() => addToCart(p)}>
-                    Add to Cart
+            {isInternational ? (
+              <div className="detail-actions">
+                <div className="qty-row">
+                  <span className="field-label mb-0">Quantity</span>
+                  <div className="qty">
+                    <button aria-label="Decrease quantity" disabled={qty <= 1} onClick={() => setQty((q) => Math.max(1, q - 1))}><FiMinus /></button>
+                    <span>{qty}</span>
+                    <button aria-label="Increase quantity" disabled={qty >= maxQty || soldOut} onClick={() => setQty((q) => Math.min(maxQty, q + 1))}><FiPlus /></button>
+                  </div>
+                </div>
+                <div className="detail-actions-row">
+                  <button className="btn-jmc btn-jmc-outline" disabled={soldOut} onClick={() => addToCart(p, qty)}>
+                    {soldOut ? "Sold Out" : "Add to Cart"}
                   </button>
-                )}
-                <button className="btn-jmc btn-jmc-outline" onClick={() => toggleWishlist(p)}>
+                  <button className="btn-jmc btn-jmc-primary" disabled={soldOut} onClick={() => buyNow(p, qty)}>
+                    Buy Now
+                  </button>
+                </div>
+                <button className="btn-jmc btn-jmc-ghost-dark" onClick={() => toggleWishlist(p)}>
                   {wished ? <FaHeart /> : <FaRegHeart />} {wished ? "In Wishlist" : "Save to Wishlist"}
                 </button>
+                {!p.internationalShipping && (
+                  <p className="enquiry-note">This piece currently ships within India only.</p>
+                )}
               </div>
-            </div>
-            <p className="enquiry-note">No account needed to enquire — we reply directly on WhatsApp.</p>
+            ) : (
+              <div className="detail-actions">
+                <WhatsAppEnquiryButton product={p} size="lg" />
+                <div className="detail-actions-row single">
+                  <button className="btn-jmc btn-jmc-outline" onClick={() => toggleWishlist(p)}>
+                    {wished ? <FaHeart /> : <FaRegHeart />} {wished ? "In Wishlist" : "Save to Wishlist"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {isInternational ? (
+              <p className="enquiry-note">Questions about this piece? <WhatsAppLink product={p} /></p>
+            ) : (
+              <p className="enquiry-note">No account needed to enquire — we reply directly on WhatsApp.</p>
+            )}
 
             <table className="spec-table">
               <tbody>
@@ -130,9 +172,20 @@ export default function ProductDetail() {
       </div>
 
       {/* Sticky mobile action bar */}
-      <div className="mobile-sticky-actions single">
-        <WhatsAppEnquiryButton product={p} size="" label="Enquire on WhatsApp" />
-      </div>
+      {isInternational ? (
+        <div className="mobile-sticky-actions">
+          <button className="btn-jmc btn-jmc-outline" disabled={soldOut} onClick={() => addToCart(p, qty)}>
+            {soldOut ? "Sold Out" : "Add to Cart"}
+          </button>
+          <button className="btn-jmc btn-jmc-primary" disabled={soldOut} onClick={() => buyNow(p, qty)}>
+            Buy Now
+          </button>
+        </div>
+      ) : (
+        <div className="mobile-sticky-actions single">
+          <WhatsAppEnquiryButton product={p} size="" label="Enquire on WhatsApp" />
+        </div>
+      )}
 
     </section>
     <RelatedProducts product={p} />

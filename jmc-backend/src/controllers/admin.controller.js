@@ -1,6 +1,9 @@
 import Product from '../models/Product.js';
 import Category from '../models/Category.js';
 import Order, { ORDER_STATUSES } from '../models/Order.js';
+import ShippingRule from '../models/ShippingRule.js';
+import { normaliseCustomerType, normaliseEnum, PAYMENT_STATUSES } from '../utils/constants.js';
+import { releaseOrderStock } from '../services/order.service.js';
 import User from '../models/User.js';
 import Banner from '../models/Banner.js';
 import Coupon from '../models/Coupon.js';
@@ -148,50 +151,138 @@ export const adminDeleteCategory = async (req, res) => {
 
 /* -------------------------------- Orders ------------------------------ */
 
+const RELEASE_STATUSES = ['cancelled', 'refund_initiated', 'refunded'];
+
+/** Admin view: the stored order plus grouped sections the admin UI can render directly. */
+const toAdminOrder = (order) => {
+  const o = typeof order.toJSON === 'function' ? order.toJSON() : order;
+  const user = o.user && typeof o.user === 'object' && o.user.email !== undefined ? o.user : null;
+  const addr = o.shippingAddress || {};
+  return {
+    ...o,
+    customerType: o.customerType || 'INDIAN',
+    currency: o.currency || 'INR',
+    sections: {
+      customer: {
+        name: o.customer?.name || addr.fullName || user?.name || '',
+        phone: o.customer?.phone || addr.phone || user?.phone || '',
+        email: o.customer?.email || addr.email || user?.email || '',
+      },
+      delivery: {
+        fullName: addr.fullName, addressLine1: addr.line1, addressLine2: addr.line2 || '',
+        city: addr.city, state: addr.state || '', country: addr.country, postalCode: addr.postalCode || '',
+      },
+      products: (o.items || []).map((i) => ({
+        product: i.name, productId: i.product, sku: i.sku, image: i.image,
+        quantity: i.quantity, unitPrice: i.price, subtotal: i.lineTotal ?? (i.price || 0) * (i.quantity || 0),
+      })),
+      payment: {
+        method: o.paymentMethod, status: o.paymentStatus,
+        razorpayOrderId: o.razorpay?.orderId || '', razorpayPaymentId: o.razorpay?.paymentId || '',
+      },
+      order: {
+        orderId: o.orderNumber, id: o.id, date: o.createdAt, customerType: o.customerType || 'INDIAN',
+        subtotal: o.subtotal, discount: o.discount, shipping: o.shippingFee, total: o.total,
+        currency: o.currency || 'INR', status: o.status, trackingNumber: o.trackingNumber || '', courier: o.courier || '',
+      },
+    },
+  };
+};
+
 export const adminListOrders = async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query, 20);
+  const q = req.query;
   const filter = {};
-  if (ORDER_STATUSES.includes(req.query.status)) filter.status = req.query.status;
-  if (req.query.search) filter.orderNumber = new RegExp(escapeRegex(String(req.query.search).trim()), 'i');
+
+  const status = normaliseEnum(q.orderStatus ?? q.status, ORDER_STATUSES);
+  if (status) filter.status = status;
+  const paymentStatus = normaliseEnum(q.paymentStatus, PAYMENT_STATUSES);
+  if (paymentStatus) filter.paymentStatus = paymentStatus;
+  const method = normaliseEnum(q.paymentMethod, ['cod', 'razorpay']);
+  if (method) filter.paymentMethod = method;
+
+  // Orders created before customerType existed have no value: they are Indian orders.
+  const type = normaliseCustomerType(q.customerType);
+  if (type === 'INTERNATIONAL') filter.customerType = 'INTERNATIONAL';
+  else if (type === 'INDIAN') filter.customerType = { $ne: 'INTERNATIONAL' };
+
+  if (q.country) filter.country = new RegExp(`^${escapeRegex(String(q.country).trim())}$`, 'i');
+  const from = q.from ? new Date(q.from) : null;
+  const to = q.to ? new Date(q.to) : null;
+  if ((from && !Number.isNaN(+from)) || (to && !Number.isNaN(+to))) {
+    filter.createdAt = {};
+    if (from && !Number.isNaN(+from)) filter.createdAt.$gte = from;
+    if (to && !Number.isNaN(+to)) filter.createdAt.$lte = to;
+  }
+
+  const term = typeof q.search === 'string' ? q.search.trim().slice(0, 100) : '';
+  if (term) {
+    const rx = new RegExp(escapeRegex(term), 'i');
+    const users = await User.find({ $or: [{ name: rx }, { email: rx }, { phone: rx }] }).select('_id').limit(200);
+    filter.$and = [{
+      $or: [
+        { orderNumber: rx }, { 'customer.name': rx }, { 'customer.email': rx }, { 'customer.phone': rx },
+        { 'shippingAddress.fullName': rx }, { 'shippingAddress.phone': rx }, { 'items.sku': rx },
+        { 'razorpay.orderId': rx }, { 'razorpay.paymentId': rx }, { user: { $in: users.map((u) => u._id) } },
+      ],
+    }];
+  }
+
   const [orders, total] = await Promise.all([
     Order.find(filter).populate('user', 'name email phone').sort({ createdAt: -1 }).skip(skip).limit(limit),
     Order.countDocuments(filter),
   ]);
-  sendSuccess(res, { orders, pagination: buildPagination(page, limit, total) }, 'Orders fetched successfully');
+  sendSuccess(res, { orders: orders.map(toAdminOrder), pagination: buildPagination(page, limit, total) }, 'Orders fetched successfully');
 };
 
 export const adminGetOrder = async (req, res) => {
   assertObjectId(req.params.id, 'order id');
   const order = await Order.findById(req.params.id).populate('user', 'name email phone');
   if (!order) throw new ApiError(404, 'Order not found');
-  sendSuccess(res, { order }, 'Order fetched successfully');
+  sendSuccess(res, { order: toAdminOrder(order) }, 'Order fetched successfully');
 };
 
 export const adminUpdateOrderStatus = async (req, res) => {
   assertObjectId(req.params.id, 'order id');
-  const { status, paymentStatus, note } = req.body;
-  if (status !== undefined && !ORDER_STATUSES.includes(status)) throw new ApiError(400, `status must be one of: ${ORDER_STATUSES.join(', ')}`);
-  if (paymentStatus !== undefined && !['pending', 'paid', 'failed', 'refunded'].includes(paymentStatus)) {
-    throw new ApiError(400, 'paymentStatus must be one of: pending, paid, failed, refunded');
+  const { note } = req.body;
+  const rawStatus = req.body.status ?? req.body.orderStatus;
+  const status = rawStatus === undefined ? undefined : normaliseEnum(rawStatus, ORDER_STATUSES);
+  if (rawStatus !== undefined && !status) throw new ApiError(400, `status must be one of: ${ORDER_STATUSES.join(', ')}`);
+  const paymentStatus = req.body.paymentStatus === undefined ? undefined : normaliseEnum(req.body.paymentStatus, PAYMENT_STATUSES);
+  if (req.body.paymentStatus !== undefined && !paymentStatus) {
+    throw new ApiError(400, `paymentStatus must be one of: ${PAYMENT_STATUSES.join(', ')}`);
   }
 
   const order = await Order.findById(req.params.id);
   if (!order) throw new ApiError(404, 'Order not found');
 
   if (status && status !== order.status) {
-    // Return stock to inventory the first time an order is cancelled/refunded.
-    const wasReleased = ['cancelled', 'refunded'].includes(order.status);
-    if (['cancelled', 'refunded'].includes(status) && !wasReleased) {
-      await Promise.all(order.items.map((i) => Product.updateOne({ _id: i.product }, { $inc: { stock: i.quantity } })));
-    } else if (wasReleased && !['cancelled', 'refunded'].includes(status)) {
+    const wasClosed = RELEASE_STATUSES.includes(order.status);
+    if (wasClosed && !RELEASE_STATUSES.includes(status)) {
       throw new ApiError(400, 'A cancelled or refunded order cannot be reopened. Ask the customer to place a new order.');
     }
+    if (order.status === 'refunded') throw new ApiError(400, 'A refunded order cannot change status.');
+    if (status === 'refund_initiated' && order.status !== 'cancelled' && order.paymentStatus !== 'paid') {
+      throw new ApiError(400, 'Only paid or cancelled orders can be refunded.');
+    }
     order.status = status;
-    order.statusHistory.push({ status, note: typeof note === 'string' ? note : '' });
+    order.statusHistory.push({ status, note: typeof note === 'string' ? note.slice(0, 300) : '' });
+
+    // Stock goes back to inventory exactly once (atomic flag).
+    if (RELEASE_STATUSES.includes(status)) await releaseOrderStock(order);
+    // Cash is collected on delivery: only now does a COD order become PAID.
+    if (status === 'delivered' && order.paymentMethod === 'cod' && order.paymentStatus === 'pending' && !paymentStatus) {
+      order.paymentStatus = 'paid';
+      order.statusHistory.push({ status, note: 'COD payment collected on delivery' });
+    }
+    if (status === 'refunded' && order.paymentStatus === 'paid' && !paymentStatus) order.paymentStatus = 'refunded';
   }
   if (paymentStatus) order.paymentStatus = paymentStatus;
+  if (typeof req.body.trackingNumber === 'string') order.trackingNumber = req.body.trackingNumber.trim().slice(0, 100);
+  if (typeof req.body.courier === 'string') order.courier = req.body.courier.trim().slice(0, 100);
   await order.save();
-  sendSuccess(res, { order }, 'Order updated successfully');
+  await order.populate('user', 'name email phone');
+  sendSuccess(res, { order: toAdminOrder(order) }, 'Order updated successfully');
 };
 
 /* -------------------------------- Users ------------------------------- */
@@ -200,6 +291,9 @@ export const adminListUsers = async (req, res) => {
   const { page, limit, skip } = parsePagination(req.query, 20);
   const filter = {};
   if (['customer', 'admin'].includes(req.query.role)) filter.role = req.query.role;
+  const ct = normaliseCustomerType(req.query.customerType);
+  if (ct === 'INTERNATIONAL') filter.customerType = 'INTERNATIONAL';
+  else if (ct === 'INDIAN') filter.customerType = { $ne: 'INTERNATIONAL' };
   if (req.query.search) {
     const rx = new RegExp(escapeRegex(String(req.query.search).trim()), 'i');
     filter.$or = [{ name: rx }, { email: rx }, { phone: rx }];
@@ -216,6 +310,15 @@ export const adminSetUserStatus = async (req, res) => {
   if (typeof req.body.active !== 'boolean') throw new ApiError(400, 'active must be true or false');
   if (String(req.user._id) === req.params.id) throw new ApiError(400, 'You cannot change your own status');
   const user = await User.findByIdAndUpdate(req.params.id, { active: req.body.active }, { new: true });
+  if (!user) throw new ApiError(404, 'User not found');
+  sendSuccess(res, { user }, 'User updated successfully');
+};
+
+export const adminSetUserCustomerType = async (req, res) => {
+  assertObjectId(req.params.id, 'user id');
+  const customerType = normaliseCustomerType(req.body.customerType);
+  if (!customerType) throw new ApiError(400, 'customerType must be INDIAN or INTERNATIONAL');
+  const user = await User.findByIdAndUpdate(req.params.id, { customerType }, { new: true });
   if (!user) throw new ApiError(404, 'User not found');
   sendSuccess(res, { user }, 'User updated successfully');
 };
@@ -244,6 +347,9 @@ const crud = (Model, label, fields, { upperCaseKey } = {}) => ({
 });
 
 export const banners = crud(Banner, 'Banner', ['title', 'subtitle', 'image', 'link', 'position', 'active', 'sortOrder']);
+export const shippingRules = crud(ShippingRule, 'ShippingRule', [
+  'name', 'countries', 'baseFee', 'perItemFee', 'freeAbove', 'estimatedDays', 'priority', 'active',
+]);
 export const coupons = crud(Coupon, 'Coupon', [
   'code', 'description', 'type', 'value', 'minOrderAmount', 'maxDiscount', 'usageLimit', 'expiresAt', 'active',
 ]);
@@ -257,14 +363,14 @@ export const adminAnalytics = async (_req, res) => {
     Order.countDocuments(),
     Order.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
     Order.aggregate([
-      { $match: { status: { $nin: ['cancelled', 'refunded'] } } },
-      { $group: { _id: null, revenue: { $sum: '$total' } } },
+      { $match: { status: { $nin: ['cancelled', 'refund_initiated', 'refunded'] } } },
+      { $group: { _id: { $ifNull: ['$currency', 'INR'] }, revenue: { $sum: '$total' } } },
     ]),
     Product.countDocuments({ stock: { $lte: 5 }, active: true }),
     Order.find().sort({ createdAt: -1 }).limit(5).select('orderNumber total status paymentStatus createdAt'),
   ]);
   sendSuccess(res, {
-    totals: { customers: users, products, orders, lowStockProducts: lowStock, revenue: revenueAgg[0]?.revenue || 0 },
+    totals: { customers: users, products, orders, lowStockProducts: lowStock, revenue: revenueAgg.find((r) => r._id === 'INR')?.revenue || 0, revenueByCurrency: Object.fromEntries(revenueAgg.map((r) => [r._id, r.revenue])) },
     ordersByStatus: Object.fromEntries(byStatus.map((s) => [s._id, s.count])),
     recentOrders,
   }, 'Analytics fetched successfully');

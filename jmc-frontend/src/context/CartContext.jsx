@@ -1,13 +1,39 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import * as cartApi from "../api/cart";
 import { useAuth } from "./AuthContext";
-import { CART_ENABLED } from "../utils/constants";
+import { useCustomerType } from "./CustomerTypeContext";
+import { useToast } from "./ToastContext";
 
 const CartContext = createContext(null);
-const EMPTY = { items: [], totalItems: 0, subtotal: 0 };
+const EMPTY = { items: [], totalItems: 0, subtotal: 0, currency: "" };
+const PENDING_KEY = "jmc_pending_cart";
 
+/** A guest who clicked Add to Cart / Buy Now is sent to sign in; the item is added right after login. */
+export const savePendingCartItem = (item) => {
+  try {
+    sessionStorage.setItem(PENDING_KEY, JSON.stringify(item));
+  } catch {
+    /* ignore */
+  }
+};
+const takePendingCartItem = () => {
+  try {
+    const raw = sessionStorage.getItem(PENDING_KEY);
+    sessionStorage.removeItem(PENDING_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The single cart (server-side, per account). It is only active for International customers;
+ * Indian customers keep the enquiry-only behaviour and never call the cart API.
+ */
 export function CartProvider({ children }) {
   const { isAuthenticated } = useAuth();
+  const { canShop, currency } = useCustomerType();
+  const toast = useToast();
   const [cart, setCart] = useState(EMPTY);
   const [loading, setLoading] = useState(false);
 
@@ -23,10 +49,38 @@ export function CartProvider({ children }) {
     }
   }, []);
 
+  // Load the cart when shopping is enabled. Any item queued while signed out is added first,
+  // so the cart (and the page the customer returns to) is complete when loading ends.
   useEffect(() => {
-    if (isAuthenticated && CART_ENABLED) refresh();
-    else setCart(EMPTY);
-  }, [isAuthenticated, refresh]);
+    if (!isAuthenticated || !canShop) {
+      setCart(EMPTY);
+      return undefined;
+    }
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const pending = takePendingCartItem();
+        if (pending?.productId) {
+          try {
+            await cartApi.addToCart(pending.productId, pending.quantity || 1);
+            if (alive) toast.success(`${pending.name || "Item"} added to your cart`);
+          } catch (e) {
+            if (alive) toast.error(e.message);
+          }
+        }
+        const res = await cartApi.getCart();
+        if (alive) setCart({ ...EMPTY, ...res.data });
+      } catch {
+        /* non-critical */
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isAuthenticated, canShop, currency, toast]);
 
   const apply = (res) => {
     setCart({ ...EMPTY, ...res.data });

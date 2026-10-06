@@ -1,5 +1,30 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcrypt';
+import { CUSTOMER_TYPES } from '../utils/constants.js';
+
+const addressSchema = new mongoose.Schema(
+  {
+    label: { type: String, trim: true, maxlength: 50, default: '' },
+    fullName: { type: String, required: true, trim: true, maxlength: 100 },
+    phone: { type: String, required: true, trim: true, maxlength: 30 },
+    email: { type: String, trim: true, lowercase: true, default: '' },
+    line1: { type: String, required: true, trim: true, maxlength: 200 },
+    line2: { type: String, trim: true, maxlength: 200, default: '' },
+    city: { type: String, required: true, trim: true, maxlength: 100 },
+    state: { type: String, trim: true, maxlength: 100, default: '' },
+    postalCode: { type: String, trim: true, maxlength: 20, default: '' },
+    country: { type: String, required: true, trim: true, maxlength: 100 },
+    isDefault: { type: Boolean, default: false },
+  },
+  { timestamps: false }
+);
+addressSchema.set('toJSON', {
+  transform: (_doc, ret) => {
+    ret.id = ret._id;
+    delete ret._id;
+    return ret;
+  },
+});
 
 const userSchema = new mongoose.Schema(
   {
@@ -16,6 +41,9 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minlength: 8, select: false },
     role: { type: String, enum: ['customer', 'admin'], default: 'customer' },
     active: { type: Boolean, default: true },
+    // Self-declared at signup / profile; admins can change it. Existing users default to INDIAN.
+    customerType: { type: String, enum: CUSTOMER_TYPES, default: 'INDIAN' },
+    addresses: { type: [addressSchema], default: [] },
   },
   { timestamps: true }
 );

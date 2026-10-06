@@ -1,12 +1,14 @@
 import { Link } from "react-router-dom";
 import useAsync from "../hooks/useAsync";
+import { useCustomerType } from "../context/CustomerTypeContext";
 import ProductGrid from "./ProductGrid";
 import { SkeletonGrid } from "./SkeletonCard";
 import ErrorState from "./ErrorState";
 import EmptyState from "./EmptyState";
 
 export default function ProductSection({ eyebrow, title, fetcher, limit = 4, viewAll, tone = "" }) {
-  const { data, loading, error, reload } = useAsync(() => fetcher({ limit }), []);
+  const { viewKey } = useCustomerType();
+  const { data, loading, error, reload } = useAsync(() => fetcher({ limit }), [viewKey]);
   const products = data?.data?.products || [];
 
   return (

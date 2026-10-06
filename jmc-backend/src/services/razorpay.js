@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { env } from '../config/env.js';
 import { ApiError } from '../utils/ApiError.js';
+import { toMinorUnits } from '../utils/currency.js';
 
 export const isRazorpayConfigured = () => Boolean(env.razorpay.keyId && env.razorpay.keySecret);
 
@@ -10,14 +11,14 @@ const assertConfigured = () => {
   }
 };
 
-/** Creates a Razorpay order via REST (no SDK needed). amount is in rupees. */
-export const createRazorpayOrder = async ({ amount, receipt }) => {
+/** Creates a Razorpay order via REST (no SDK needed). amount is in major units (rupees/dollars) of `currency`. */
+export const createRazorpayOrder = async ({ amount, currency = 'INR', receipt }) => {
   assertConfigured();
   const auth = Buffer.from(`${env.razorpay.keyId}:${env.razorpay.keySecret}`).toString('base64');
   const res = await fetch('https://api.razorpay.com/v1/orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Basic ${auth}` },
-    body: JSON.stringify({ amount: Math.round(amount * 100), currency: 'INR', receipt }),
+    body: JSON.stringify({ amount: toMinorUnits(amount), currency, receipt }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(502, body?.error?.description || 'Could not create payment order');

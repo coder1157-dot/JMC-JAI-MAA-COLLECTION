@@ -36,6 +36,13 @@ router.patch('/orders/:id/status', a.adminUpdateOrderStatus);
 router.get('/users', a.adminListUsers);
 router.patch('/users/:id/status', a.adminSetUserStatus);
 
+router.patch('/users/:id/customer-type', a.adminSetUserCustomerType);
+
+router.get('/shipping-rules', a.shippingRules.list);
+router.post('/shipping-rules', a.shippingRules.create);
+router.put('/shipping-rules/:id', a.shippingRules.update);
+router.delete('/shipping-rules/:id', a.shippingRules.remove);
+
 router.get('/banners', a.banners.list);
 router.post('/banners', a.banners.create);
 router.put('/banners/:id', a.banners.update);
