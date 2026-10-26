@@ -25,7 +25,7 @@ Never commit `.env`.
 | `JWT_SECRET` | **yes** | Long random string |
 | `JWT_EXPIRES_IN` | no | Default `7d` |
 | `FRONTEND_URL` | **yes** | Allowed origin(s), comma-separated, no trailing slash |
-| `JMC_WHATSAPP_NUMBER` | **yes** for contact/WhatsApp | `919259542580` (digits, international format) |
+| `JMC_WHATSAPP_NUMBER` | **yes** for contact/WhatsApp | `91XXXXXXXX` (digits, international format) |
 | `JMC_PHONE`, `JMC_EMAIL`, `JMC_ADDRESS`, `JMC_INSTAGRAM`, `JMC_FACEBOOK`, `JMC_YOUTUBE` | no | Public contact details |
 | `CLOUDINARY_*` | no | Enables admin image-upload signatures |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | no | Enables online payments (COD works without) |
@@ -72,7 +72,7 @@ Values are trimmed and trailing slashes ignored. Allowed origins receive `Access
 The server listens on `0.0.0.0` and `process.env.PORT`. Free Render instances sleep when idle, so the first request can be slow.
 
 ## 9. WhatsApp enquiry
-Customers contact the shop directly on WhatsApp; no account, login, OTP or enquiry form, and no enquiry is stored. The frontend reads `GET /api/settings/contact` (`whatsapp: "919259542580"`) and builds `https://wa.me/919259542580?text=<encoded message>` from the product fields (example in the API docs). If `JMC_WHATSAPP_NUMBER` is missing, that endpoint returns a clear 503 instead of crashing.
+Customers contact the shop directly on WhatsApp; no account, login, OTP or enquiry form, and no enquiry is stored. The frontend reads `GET /api/settings/contact` (`whatsapp: "91XXXXXXXXX"`) and builds `https://wa.me/91XXXXXXXXX?text=<encoded message>` from the product fields (example in the API docs). If `JMC_WHATSAPP_NUMBER` is missing, that endpoint returns a clear 503 instead of crashing.
 
 ## Project structure
 ```
