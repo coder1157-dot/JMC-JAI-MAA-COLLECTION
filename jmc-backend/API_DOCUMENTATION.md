@@ -45,8 +45,8 @@ Public info only, no secrets. Source: environment variables.
 {
   "success": true,
   "data": {
-    "whatsapp": "919259542580",
-    "phone": "9259542580",
+    "whatsapp": "91XXXXXXXX",
+    "phone": "91XXXXXXXX",
     "email": "",
     "address": "",
     "social": { "instagram": "", "facebook": "", "youtube": "" }
@@ -61,7 +61,7 @@ Public info only, no secrets. Source: environment variables.
 ```
 
 ### Building the product WhatsApp enquiry (frontend)
-No enquiry is stored by the backend; the customer contacts the shop directly (no login, signup or form). Every public product has `id`, `name`, `slug`, `sku`, `category` (slug), `categoryName`, `subcategory`. **The message never contains a price** – the customer asks for the latest rate on WhatsApp. The WhatsApp number comes from `JMC_WHATSAPP_NUMBER` (e.g. `919259542580`) via `GET /settings/contact`.
+No enquiry is stored by the backend; the customer contacts the shop directly (no login, signup or form). Every public product has `id`, `name`, `slug`, `sku`, `category` (slug), `categoryName`, `subcategory`. **The message never contains a price** – the customer asks for the latest rate on WhatsApp. The WhatsApp number comes from `JMC_WHATSAPP_NUMBER` (e.g. `91XXXXXXXX`) via `GET /settings/contact`.
 
 ```js
 export function buildWhatsAppUrl(whatsapp, product) {
